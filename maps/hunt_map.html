@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8' />
+    <title>Keystone Hunt Map</title>
+    <meta name='viewport' content='initial-scale=1,maximum-scale=1,user-scalable=no' />
+    <script src='https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.js'></script>
+    <link href='https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.css' rel='stylesheet' />
+    <script src='data/pa_wmu_harvest.js'></script>
+    <script src='https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js'></script>
+
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255,255,255,0.92);
+            border-radius: 8px;
+            padding: 14px 16px;
+            font-family: sans-serif;
+            font-size: 13px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            min-width: 160px;
+        }
+        .layer-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 6px 0;
+            cursor: pointer;
+            user-select: none;
+        }
+        .swatch { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
+        .sw { position: relative; display: inline-block; width: 32px; height: 18px; flex-shrink: 0; }
+        .sw input { opacity: 0; width: 0; height: 0; position: absolute; }
+        .sw-track {
+            position: absolute;
+            inset: 0;
+            background: #ccc;
+            border-radius: 18px;
+            transition: background .2s;
+        }
+        .sw-track:before {
+            content: '';
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            left: 3px;
+            top: 3px;
+            background: #fff;
+            border-radius: 50%;
+            transition: transform .2s;
+        }
+        .sw input:checked + .sw-track { background: #33383f; }
+        .sw input:checked + .sw-track:before { transform: translateX(14px); }
+        #forecast-btn {
+            margin-top: 10px;
+            width: 100%;
+            padding: 6px 0;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background: #f5f5f5;
+            font-family: sans-serif;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        #forecast-btn.active {
+            background: #2d6a4f;
+            color: #fff;
+            border-color: #1b4332;
+        }
+        #forecast {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255,255,255,0.92);
+            border-radius: 8px;
+            padding: 20px 28px;
+            font-family: sans-serif;
+            font-size: 15px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            display: none;
+            gap: 28px;
+        }
+        .forecast-day { text-align: center; min-width: 110px; }
+        .forecast-day .day-name { font-weight: 700; margin-bottom: 6px; font-size: 15px; }
+        .forecast-day .day-desc { color: #555; font-size: 13px; margin-bottom: 6px; }
+        .forecast-day .day-temps { font-size: 16px; }
+        .forecast-day .day-temps span { color: #c1121f; }
+        .forecast-day .day-temps small { color: #457b9d; }
+        .forecast-day .day-precip { font-size: 13px; color: #666; margin-top: 4px; }
+        .forecast-day .day-sun { font-size: 12px; color: #888; margin-top: 4px; }
+        #forecast-hint {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.55);
+            color: #fff;
+            border-radius: 6px;
+            padding: 12px 24px;
+            font-family: sans-serif;
+            font-size: 15px;
+            pointer-events: none;
+            display: none;
+        }
+        #draw-toolbar {
+            position: absolute;
+            bottom: 40px;
+            left: 10px;
+            background: rgba(255,255,255,0.92);
+            border-radius: 8px;
+            padding: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .tool-btn {
+            width: 36px;
+            height: 36px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            background: #f5f5f5;
+            cursor: pointer;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+        }
+        .tool-btn:hover { background: #e8e8e8; }
+        .tool-btn.active { background: #2d6a4f; color: #fff; border-color: #1b4332; }
+        .tool-btn.clear { color: #c00; }
+        #tool-tooltip {
+            position: fixed;
+            background: rgba(0,0,0,0.72);
+            color: #fff;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-family: sans-serif;
+            font-size: 12px;
+            pointer-events: none;
+            display: none;
+            white-space: nowrap;
+            z-index: 100;
+            transform: translate(14px, -50%);
+        }
+    </style>
+</head>
+<body>
+<div id='map'></div>
+<div id='controls'>
+    <div style='font-weight:700; margin-bottom:8px; font-size:14px;'>Layers</div>
+    <label class='layer-toggle'>
+        <span class='sw'><input type='checkbox' id='toggle-states' checked><span class='sw-track'></span></span>
+        <div class='swatch' style='background:#ffffff; border:2px solid #222; box-sizing:border-box;'></div>
+        States
+    </label>
+    <label class='layer-toggle'>
+        <span class='sw'><input type='checkbox' id='toggle-counties'><span class='sw-track'></span></span>
+        <div class='swatch' style='background:#ffffff; border:1px solid #888; box-sizing:border-box;'></div>
+        Counties
+    </label>
+    <label class='layer-toggle'>
+        <span class='sw'><input type='checkbox' id='toggle-hunting-units' checked><span class='sw-track'></span></span>
+        <div class='swatch' style='background:#c8a951; border:1.5px solid #8a6a1a; box-sizing:border-box;'></div>
+        Hunting Units
+    </label>
+    <label class='layer-toggle'>
+        <span class='sw'><input type='checkbox' id='toggle-pa-harvest'><span class='sw-track'></span></span>
+        <div class='swatch' style='background:linear-gradient(to right,#ffffb2,#fd8d3c,#bd0026); border-radius:2px;'></div>
+        PA Harvest Density
+    </label>
+    <div id='harvest-year-ctrl' style='display:none; padding:2px 0 4px 40px;'>
+        <div style='display:flex; justify-content:space-between; font-size:11px; color:#888; margin-bottom:2px;'>
+            <span>2009</span><b id='harvest-year-label'>2024</b><span>2024</span>
+        </div>
+        <input type='range' id='harvest-year-slider' min='2009' max='2024' step='1' value='2024' style='width:100%; margin:0; accent-color:#8a6a1a;'>
+    </div>
+    <label class='layer-toggle'>
+        <span class='sw'><input type='checkbox' id='toggle-cwd-dma'><span class='sw-track'></span></span>
+        <div class='swatch' style='background:#9e2a2b; opacity:0.8;'></div>
+        PA CWD Zones
+    </label>
+    <label class='layer-toggle'>
+        <span class='sw'><input type='checkbox' id='toggle-public-lands'><span class='sw-track'></span></span>
+        <div class='swatch' style='background:#2d6a4f; opacity:0.8;'></div>
+        Public Lands
+    </label>
+    <label class='layer-toggle'>
+        <span class='sw'><input type='checkbox' id='toggle-att'><span class='sw-track'></span></span>
+        <div class='swatch' style='background:#146ef5; opacity:0.8;'></div>
+        AT&amp;T Coverage
+    </label>
+    <label class='layer-toggle'>
+        <span class='sw'><input type='checkbox' id='toggle-poi'><span class='sw-track'></span></span>
+        <div class='swatch' style='background:#ff6600; opacity:0.8;'></div>
+        Hunting Stores
+    </label>
+    <label class='layer-toggle'>
+        <span class='sw'><input type='checkbox' id='toggle-radar-noaa'><span class='sw-track'></span></span>
+        <div class='swatch' style='background:#00cc88; opacity:0.8;'></div>
+        Radar (NOAA)
+    </label>
+    <hr style='border:none;border-top:1px solid #ddd;margin:8px 0;'>
+    <label class='layer-toggle'>
+        <span class='sw'><input type='checkbox' id='toggle-satellite'><span class='sw-track'></span></span>
+        <div class='swatch' style='background:#333; opacity:0.8;'></div>
+        Satellite
+    </label>
+    <label class='layer-toggle'>
+        <span class='sw'><input type='checkbox' id='toggle-labels' checked><span class='sw-track'></span></span>
+        <div class='swatch' style='background:#aaa; opacity:0.8;'></div>
+        Labels
+    </label>
+    <button id='forecast-btn'>&#9925; 3-Day Forecast</button>
+</div>
+<div id='forecast-hint'>Click anywhere on the map for a 3-day forecast</div>
+<div id='forecast'></div>
+<div id='draw-toolbar'>
+    <button class='tool-btn' id='btn-measure' title='Measure distance'>📏</button>
+    <button class='tool-btn' id='btn-circle' title='Draw radius circle'>⭕</button>
+    <button class='tool-btn clear' id='btn-clear' title='Clear drawings'>✕</button>
+</div>
+<div id='tool-tooltip'></div>
+<script>
+    mapboxgl.accessToken = 'pk.eyJ1Ijoia2V5c3RvbmVjYXJ0byIsImEiOiJjbWxqeTZiMmgwNG9jM2Vwem40aG9tNGtlIn0.Gt2pHdsBoaTBT0jaNJacng';
+
+    const map = new mapboxgl.Map({
+        container: 'map',
+        style: 'mapbox://styles/keystonecarto/cmlrnr9vc004h01quch6rev08',
+        // style: 'mapbox://styles/keystonecarto/cmlk0r3zj005v01qpesb5bfry',
+        center: [-76.528, 41.985],
+        zoom: 6
+    });
+
+    map.addControl(new mapboxgl.NavigationControl(), 'top-left');
+
+    map.on('load', () => {
+
+        // State mask — always on, black fill with holes cut out for NY/NJ/PA
+        map.addSource('state-mask', { type: 'vector', url: 'mapbox://keystonecarto.state_mask' });
+        map.addLayer({
+            id: 'state-mask-fill',
+            type: 'fill',
+            slot: 'middle',
+            source: 'state-mask',
+            'source-layer': 'state_mask',
+            paint: { 'fill-color': '#000000', 'fill-opacity': 0.5 }
+        });
+
+        // State borders
+        map.addSource('census-states', { type: 'vector', url: 'mapbox://keystonecarto.census_states' });
+        map.addLayer({
+            id: 'states-line',
+            type: 'line',
+            slot: 'top',
+            source: 'census-states',
+            'source-layer': 'census_states',
+            paint: { 'line-color': '#222222', 'line-width': 2 }
+        });
+        document.getElementById('toggle-states').addEventListener('change', (e) => {
+            map.setLayoutProperty('states-line', 'visibility', e.target.checked ? 'visible' : 'none');
+        });
+
+        // County borders
+        map.addSource('census-counties', { type: 'vector', url: 'mapbox://keystonecarto.census_counties' });
+        map.addLayer({
+            id: 'counties-line',
+            type: 'line',
+            slot: 'top',
+            source: 'census-counties',
+            'source-layer': 'census_counties',
+            paint: { 'line-color': '#666666', 'line-width': 0.8, 'line-dasharray': [2, 2] },
+            layout: { visibility: 'none' }
+        });
+        document.getElementById('toggle-counties').addEventListener('change', (e) => {
+            map.setLayoutProperty('counties-line', 'visibility', e.target.checked ? 'visible' : 'none');
+        });
+
+        // Hunting Units (NJ DMZ / NY WMU / PA WMU)
+        map.addSource('hunting-units', {
+            type: 'vector',
+            url: 'mapbox://keystonecarto.hunting_units',
+            promoteId: 'zone_id'   // zone_id is the property that exists in the tileset
+        });
+        map.addLayer({
+            id: 'hunting-units-fill',
+            type: 'fill',
+            slot: 'top',
+            source: 'hunting-units',
+            'source-layer': 'hunting_units',
+            paint: { 'fill-color': '#c8a951', 'fill-opacity': 0.2 }
+        });
+        map.addLayer({
+            id: 'hunting-units-line',
+            type: 'line',
+            slot: 'top',
+            source: 'hunting-units',
+            'source-layer': 'hunting_units',
+            paint: { 'line-color': '#8a6a1a', 'line-width': 1 }
+        });
+        map.addLayer({
+            id: 'hunting-units-label',
+            type: 'symbol',
+            slot: 'top',
+            source: 'hunting-units',
+            'source-layer': 'hunting_units',
+            layout: {
+                'text-field': ['get', 'zone_id'],
+                'text-size': 11,
+                'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
+                'text-anchor': 'center'
+            },
+            paint: {
+                'text-color': '#5a4010',
+                'text-halo-color': 'rgba(255,255,255,0.85)',
+                'text-halo-width': 1.5
+            }
+        });
+        map.on('click', 'hunting-units-fill', (e) => {
+            if (activeTool) return;
+            const p = e.features[0].properties;
+            const typeLabel = { DMZ: 'NJ Deer Management Zone', UNIT: 'NY Wildlife Management Unit', WMU_ID: 'PA Wildlife Management Unit' };
+            new mapboxgl.Popup({ maxWidth: '220px' })
+                .setLngLat(e.lngLat)
+                .setHTML(`<div style="font-family:sans-serif;font-size:13px">
+                    <div style="font-weight:700;margin-bottom:4px">${typeLabel[p.zone_type] || p.zone_type}</div>
+                    <div>Zone: <b>${p.zone_id}</b></div>
+                </div>`)
+                .addTo(map);
+        });
+        map.on('mouseenter', 'hunting-units-fill', () => map.getCanvas().style.cursor = 'pointer');
+        map.on('mouseleave', 'hunting-units-fill', () => map.getCanvas().style.cursor = '');
+        document.getElementById('toggle-hunting-units').addEventListener('change', (e) => {
+            const vis = e.target.checked ? 'visible' : 'none';
+            map.setLayoutProperty('hunting-units-fill', 'visibility', vis);
+            map.setLayoutProperty('hunting-units-line', 'visibility', vis);
+            map.setLayoutProperty('hunting-units-label', 'visibility', vis);
+        });
+
+        // PA Harvest Density — choropleth on PA WMUs via feature-state join
+        map.addLayer({
+            id: 'harvest-pa-fill',
+            type: 'fill',
+            slot: 'top',
+            source: 'hunting-units',
+            'source-layer': 'hunting_units',
+            filter: ['==', ['get', 'zone_type'], 'WMU_ID'],
+            paint: {
+                'fill-color': [
+                    'interpolate', ['linear'],
+                    ['coalesce', ['feature-state', 'harvest'], 0],
+                    0,   '#ffffb2',
+                    2,   '#fecc5c',
+                    3.5, '#fd8d3c',
+                    5,   '#f03b20',
+                    6,   '#bd0026'
+                ],
+                'fill-opacity': 0.75
+            },
+            layout: { visibility: 'none' }
+        }, 'hunting-units-line');
+
+        // All zone_ids across all years (PA WMUs are constant but safe to collect dynamically)
+        const allWmuIds = new Set(Object.values(paHarvestData).flatMap(Object.keys));
+
+        function applyHarvestYear(year) {
+            const data = paHarvestData[String(year)] || {};
+            allWmuIds.forEach(zoneId => {
+                map.setFeatureState(
+                    { source: 'hunting-units', sourceLayer: 'hunting_units', id: zoneId },
+                    { harvest: data[zoneId] ?? null }
+                );
+            });
+            document.getElementById('harvest-year-label').textContent = year;
+        }
+
+        // Initialize to most recent year
+        applyHarvestYear(2024);
+
+        document.getElementById('harvest-year-slider').addEventListener('input', (e) => {
+            applyHarvestYear(parseInt(e.target.value));
+        });
+
+        map.on('click', 'harvest-pa-fill', (e) => {
+            if (activeTool) return;
+            const p   = e.features[0].properties;
+            const yr  = document.getElementById('harvest-year-slider').value;
+            const val = (paHarvestData[yr] || {})[p.zone_id];
+            new mapboxgl.Popup({ maxWidth: '220px' })
+                .setLngLat(e.lngLat)
+                .setHTML(`<div style="font-family:sans-serif;font-size:13px">
+                    <div style="font-weight:700;margin-bottom:4px">PA WMU ${p.zone_id}</div>
+                    <div>Antlered deer / sq mi: <b>${val != null ? val.toFixed(2) : 'n/a'}</b></div>
+                    <div style="color:#888;font-size:11px;margin-top:4px">${yr} season</div>
+                </div>`)
+                .addTo(map);
+        });
+        map.on('mouseenter', 'harvest-pa-fill', () => map.getCanvas().style.cursor = 'pointer');
+        map.on('mouseleave', 'harvest-pa-fill', () => map.getCanvas().style.cursor = '');
+        document.getElementById('toggle-pa-harvest').addEventListener('change', (e) => {
+            map.setLayoutProperty('harvest-pa-fill', 'visibility', e.target.checked ? 'visible' : 'none');
+            document.getElementById('harvest-year-ctrl').style.display = e.target.checked ? 'block' : 'none';
+        });
+
+        // PA CWD Disease Management Areas
+        map.addSource('cwd-dma', { type: 'vector', url: 'mapbox://keystonecarto.cwd_disease_management_area' });
+        map.addLayer({
+            id: 'cwd-dma-fill',
+            type: 'fill',
+            slot: 'top',
+            source: 'cwd-dma',
+            'source-layer': 'cwd_disease_management_area',
+            paint: { 'fill-color': '#9e2a2b', 'fill-opacity': 0.2 },
+            layout: { visibility: 'none' }
+        });
+        map.addLayer({
+            id: 'cwd-dma-line',
+            type: 'line',
+            slot: 'top',
+            source: 'cwd-dma',
+            'source-layer': 'cwd_disease_management_area',
+            paint: { 'line-color': '#9e2a2b', 'line-width': 1.5, 'line-dasharray': [3, 2] },
+            layout: { visibility: 'none' }
+        });
+        map.on('click', 'cwd-dma-fill', (e) => {
+            if (activeTool) return;
+            const p = e.features[0].properties;
+            new mapboxgl.Popup({ maxWidth: '200px' })
+                .setLngLat(e.lngLat)
+                .setHTML(`<div style="font-family:sans-serif;font-size:13px">
+                    <div style="font-weight:700;margin-bottom:4px">⚠️ ${p.NAME}</div>
+                    <div style="color:#9e2a2b;font-size:11px">PA CWD Disease Management Area</div>
+                </div>`)
+                .addTo(map);
+        });
+        map.on('mouseenter', 'cwd-dma-fill', () => map.getCanvas().style.cursor = 'pointer');
+        map.on('mouseleave', 'cwd-dma-fill', () => map.getCanvas().style.cursor = '');
+        document.getElementById('toggle-cwd-dma').addEventListener('change', (e) => {
+            const vis = e.target.checked ? 'visible' : 'none';
+            map.setLayoutProperty('cwd-dma-fill', 'visibility', vis);
+            map.setLayoutProperty('cwd-dma-line', 'visibility', vis);
+        });
+
+        // Public Lands (NJ parks/forests, NY DEC lands, PA state game lands)
+        map.addSource('public-lands', {
+            type: 'vector',
+            url: 'mapbox://keystonecarto.public_lands'
+        });
+        map.addLayer({
+            id: 'public-lands-fill',
+            type: 'fill',
+            slot: 'top',
+            source: 'public-lands',
+            'source-layer': 'public_lands',
+            paint: { 'fill-color': '#2d6a4f', 'fill-opacity': 0.25 },
+            layout: { visibility: 'none' }
+        });
+        map.addLayer({
+            id: 'public-lands-line',
+            type: 'line',
+            slot: 'top',
+            source: 'public-lands',
+            'source-layer': 'public_lands',
+            paint: { 'line-color': '#1b4332', 'line-width': 0.8 },
+            layout: { visibility: 'none' }
+        });
+        map.on('click', 'public-lands-fill', (e) => {
+            if (activeTool) return;
+            const p = e.features[0].properties;
+            const acres = p.acres != null ? Number(p.acres).toLocaleString('en-US', { maximumFractionDigits: 0 }) + ' ac' : 'n/a';
+            new mapboxgl.Popup({ maxWidth: '240px' })
+                .setLngLat(e.lngLat)
+                .setHTML(`<div style="font-family:sans-serif;font-size:13px">
+                    <div style="font-weight:700;margin-bottom:4px">${p.name || 'Public Land'}</div>
+                    <div style="color:#555;margin-bottom:2px">${p.land_type || ''}</div>
+                    <div>State: <b>${p.state}</b></div>
+                    ${p.managed_by ? `<div>Managed by: <b>${p.managed_by}</b></div>` : ''}
+                    <div>Area: <b>${acres}</b></div>
+                </div>`)
+                .addTo(map);
+        });
+        map.on('mouseenter', 'public-lands-fill', () => map.getCanvas().style.cursor = 'pointer');
+        map.on('mouseleave', 'public-lands-fill', () => map.getCanvas().style.cursor = '');
+        document.getElementById('toggle-public-lands').addEventListener('change', (e) => {
+            const vis = e.target.checked ? 'visible' : 'none';
+            map.setLayoutProperty('public-lands-fill', 'visibility', vis);
+            map.setLayoutProperty('public-lands-line', 'visibility', vis);
+        });
+
+        // AT&T Coverage — style layers, one toggle
+        const attStyleLayers = ['att-res6', 'att-res7', 'att-res8'];
+        map.on('click', 'att-res8', (e) => {
+            if (activeTool) return;
+            const props = e.features[0].properties;
+            const rows = Object.entries(props)
+                .filter(([k, v]) => v !== null && v !== 'null')
+                .slice(0, 10)
+                .map(([k, v]) => '<tr><td style="color:#666;padding-right:8px">' + k + '</td><td><b>' + v + '</b></td></tr>')
+                .join('');
+            new mapboxgl.Popup({ maxWidth: '320px' })
+                .setLngLat(e.lngLat)
+                .setHTML('<table style="font-family:sans-serif;font-size:12px;border-collapse:collapse">' + rows + '</table>')
+                .addTo(map);
+        });
+        map.on('mouseenter', 'att-res8', () => map.getCanvas().style.cursor = 'pointer');
+        map.on('mouseleave', 'att-res8', () => map.getCanvas().style.cursor = '');
+        document.getElementById('toggle-att').addEventListener('change', (e) => {
+            const vis = e.target.checked ? 'visible' : 'none';
+            attStyleLayers.forEach((id) => {
+                map.setLayoutProperty(id, 'visibility', vis);
+            });
+        });
+
+        // Hunting Stores (OSM POI)
+        map.addSource('poi-stores', {
+            type: 'vector',
+            url: 'mapbox://keystonecarto.hunting_stores'
+        });
+        map.addLayer({
+            id: 'poi-stores-circle',
+            type: 'circle',
+            slot: 'top',
+            source: 'poi-stores',
+            'source-layer': 'hunting_stores',
+            paint: {
+                'circle-radius': 4,
+                'circle-color': '#FF7D03',
+                'circle-stroke-width': 1.5,
+                'circle-stroke-color': '#FFC17F'
+            },
+            layout: { visibility: 'none' }
+        });
+        map.on('click', 'poi-stores-circle', (e) => {
+            if (activeTool) return;
+            const p = e.features[0].properties;
+            const lines = [
+                p.name    ? `<b>${p.name}</b>`          : null,
+                p.shop    ? `Type: ${p.shop}`            : null,
+                p.phone   ? `📞 ${p.phone}`              : null,
+                p.website ? `<a href="${p.website}" target="_blank">Website</a>` : null,
+                p.addr    ? `${p.addr}`                  : null,
+            ].filter(Boolean).join('<br>');
+            new mapboxgl.Popup({ maxWidth: '260px' })
+                .setLngLat(e.lngLat)
+                .setHTML(`<div style="font-family:sans-serif;font-size:13px">${lines}</div>`)
+                .addTo(map);
+        });
+        map.on('mouseenter', 'poi-stores-circle', () => map.getCanvas().style.cursor = 'pointer');
+        map.on('mouseleave', 'poi-stores-circle', () => map.getCanvas().style.cursor = '');
+        document.getElementById('toggle-poi').addEventListener('change', (e) => {
+            map.setLayoutProperty('poi-stores-circle', 'visibility', e.target.checked ? 'visible' : 'none');
+        });
+
+        // Satellite basemap overlay
+        map.addSource('satellite', {
+            type: 'raster',
+            url: 'mapbox://mapbox.satellite',
+            tileSize: 256
+        });
+        map.addLayer({
+            id: 'satellite-layer',
+            type: 'raster',
+            slot: 'bottom',
+            source: 'satellite',
+            layout: { visibility: 'none' }
+        });
+        document.getElementById('toggle-satellite').checked = false;
+        document.getElementById('toggle-satellite').addEventListener('change', (e) => {
+            map.setLayoutProperty('satellite-layer', 'visibility', e.target.checked ? 'visible' : 'none');
+        });
+
+        // Labels — Standard style config properties
+        document.getElementById('toggle-labels').addEventListener('change', (e) => {
+            const show = e.target.checked;
+            map.setConfigProperty('basemap', 'showPlaceLabels',           show);
+            map.setConfigProperty('basemap', 'showRoadLabels',            show);
+            map.setConfigProperty('basemap', 'showPointOfInterestLabels', show);
+            map.setConfigProperty('basemap', 'showTransitLabels',         show);
+        });
+
+        // NOAA/IEM NEXRAD — live radar tiles, no API key needed
+        map.addSource('radar-noaa', {
+            type: 'raster',
+            tiles: ['https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png'],
+            tileSize: 256,
+            attribution: 'NOAA/IEM'
+        });
+        map.addLayer({
+            id: 'radar-noaa-layer',
+            type: 'raster',
+            source: 'radar-noaa',
+            paint: { 'raster-opacity': 0.6 },
+            layout: { visibility: 'none' }
+        });
+        document.getElementById('toggle-radar-noaa').addEventListener('change', (e) => {
+            map.setLayoutProperty('radar-noaa-layer', 'visibility', e.target.checked ? 'visible' : 'none');
+        });
+
+        // 3-day forecast — toggled by button
+        const wmoDesc = {
+            0:'Clear sky',1:'Mainly clear',2:'Partly cloudy',3:'Overcast',
+            45:'Fog',48:'Icy fog',51:'Light drizzle',53:'Drizzle',55:'Heavy drizzle',
+            61:'Light rain',63:'Rain',65:'Heavy rain',71:'Light snow',73:'Snow',
+            75:'Heavy snow',80:'Rain showers',81:'Showers',82:'Heavy showers',
+            95:'Thunderstorm',96:'Thunderstorm w/ hail',99:'Thunderstorm w/ hail'
+        };
+
+        async function fetchForecast(e) {
+            if (activeTool) return;
+            const { lng, lat } = e.lngLat;
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}` +
+                `&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode,sunrise,sunset` +
+                `&forecast_days=3&timezone=auto&temperature_unit=fahrenheit`;
+            const data = await (await fetch(url)).json();
+            const days = data.daily;
+            const panel = document.getElementById('forecast');
+            panel.style.display = 'flex';
+            document.getElementById('forecast-hint').style.display = 'none';
+            panel.innerHTML = days.time.map((date, i) => {
+                const name    = new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                const desc    = wmoDesc[days.weathercode[i]] || 'Unknown';
+                const hi      = Math.round(days.temperature_2m_max[i]);
+                const lo      = Math.round(days.temperature_2m_min[i]);
+                const precip  = days.precipitation_probability_max[i];
+                const sunrise = new Date(days.sunrise[i]).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                const sunset  = new Date(days.sunset[i]).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                return `<div class='forecast-day'>
+                    <div class='day-name'>${name}</div>
+                    <div class='day-desc'>${desc}</div>
+                    <div class='day-temps'><span>${hi}°</span> / <small>${lo}°</small></div>
+                    <div class='day-precip'>💧 ${precip}%</div>
+                    <div class='day-sun'>🌅 ${sunrise} &nbsp; 🌇 ${sunset}</div>
+                </div>`;
+            }).join('');
+        }
+
+        const forecastBtn = document.getElementById('forecast-btn');
+        forecastBtn.addEventListener('click', () => {
+            const active = forecastBtn.classList.toggle('active');
+            if (active) {
+                document.getElementById('forecast-hint').style.display = 'block';
+                map.on('click', fetchForecast);
+            } else {
+                document.getElementById('forecast-hint').style.display = 'none';
+                document.getElementById('forecast').style.display = 'none';
+                map.off('click', fetchForecast);
+            }
+        });
+
+        // ─── Drawing tools ────────────────────────────────────────────────────
+        let activeTool   = null;   // 'measure' | 'circle' | null
+        let measurePoints = [];    // [[lng,lat], ...]
+        let circleCenter = null;   // [lng,lat] — center placed on first click
+
+        map.addSource('measure-source', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] }
+        });
+        map.addSource('circle-source', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] }
+        });
+
+        map.addLayer({
+            id: 'measure-line',
+            type: 'line',
+            source: 'measure-source',
+            filter: ['==', '$type', 'LineString'],
+            paint: { 'line-color': '#ffcc00', 'line-width': 2.5, 'line-dasharray': [3, 2] }
+        });
+        map.addLayer({
+            id: 'measure-points',
+            type: 'circle',
+            source: 'measure-source',
+            filter: ['==', '$type', 'Point'],
+            paint: { 'circle-radius': 5, 'circle-color': '#ffcc00', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' }
+        });
+        map.addLayer({
+            id: 'circle-fill',
+            type: 'fill',
+            source: 'circle-source',
+            filter: ['==', '$type', 'Polygon'],
+            paint: { 'fill-color': '#3388ff', 'fill-opacity': 0.12 }
+        });
+        map.addLayer({
+            id: 'circle-line',
+            type: 'line',
+            source: 'circle-source',
+            filter: ['==', '$type', 'Polygon'],
+            paint: { 'line-color': '#3388ff', 'line-width': 2 }
+        });
+        map.addLayer({
+            id: 'circle-center',
+            type: 'circle',
+            source: 'circle-source',
+            filter: ['==', '$type', 'Point'],
+            paint: { 'circle-radius': 5, 'circle-color': '#3388ff', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' }
+        });
+
+        function formatDist(km) {
+            const miles = km * 0.621371;
+            if (miles >= 0.1) return miles.toFixed(2) + ' mi';
+            return Math.round(km * 3280.84) + ' ft';
+        }
+
+        function formatRadius(km) {
+            const miles = km * 0.621371;
+            if (miles >= 2) return miles.toFixed(2) + ' mi';
+            return Math.round(km * 1093.61) + ' yards';
+        }
+
+        function updateMeasureSource() {
+            const features = [];
+            measurePoints.forEach(pt => features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: pt } }));
+            if (measurePoints.length > 1) {
+                features.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: measurePoints } });
+            }
+            map.getSource('measure-source').setData({ type: 'FeatureCollection', features });
+        }
+
+        function updateCircleSource(center, radiusKm) {
+            const features = [];
+            if (center) {
+                features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: center } });
+                if (radiusKm > 0) features.push(turf.circle(center, radiusKm, { steps: 64 }));
+            }
+            map.getSource('circle-source').setData({ type: 'FeatureCollection', features });
+        }
+
+        function setActiveTool(tool) {
+            activeTool = tool;
+            document.getElementById('btn-measure').classList.toggle('active', tool === 'measure');
+            document.getElementById('btn-circle').classList.toggle('active', tool === 'circle');
+            map.getCanvas().style.cursor = tool ? 'crosshair' : '';
+            if (!tool) document.getElementById('tool-tooltip').style.display = 'none';
+        }
+
+        function clearDrawings() {
+            measurePoints = [];
+            circleCenter  = null;
+            updateMeasureSource();
+            updateCircleSource(null, 0);
+        }
+
+        document.getElementById('btn-measure').addEventListener('click', () => {
+            if (activeTool === 'measure') { setActiveTool(null); } else { clearDrawings(); setActiveTool('measure'); }
+        });
+        document.getElementById('btn-circle').addEventListener('click', () => {
+            if (activeTool === 'circle') { setActiveTool(null); } else { clearDrawings(); setActiveTool('circle'); }
+        });
+        document.getElementById('btn-clear').addEventListener('click', () => {
+            clearDrawings();
+            setActiveTool(null);
+        });
+
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setActiveTool(null); });
+
+        // General click: add measure points or set circle center/radius
+        map.on('click', (e) => {
+            if (!activeTool) return;
+            const lngLat = [e.lngLat.lng, e.lngLat.lat];
+            if (activeTool === 'measure') {
+                measurePoints.push(lngLat);
+                updateMeasureSource();
+            } else if (activeTool === 'circle') {
+                if (!circleCenter) {
+                    circleCenter = lngLat;
+                    updateCircleSource(circleCenter, 0);
+                } else {
+                    // Second click finalizes the circle
+                    const radiusKm = turf.distance(circleCenter, lngLat, { units: 'kilometers' });
+                    updateCircleSource(circleCenter, radiusKm);
+                    setActiveTool(null);
+                }
+            }
+        });
+
+        // Double-click finishes measure line (remove the duplicate point added by 2nd click)
+        map.on('dblclick', (e) => {
+            if (activeTool === 'measure') {
+                e.preventDefault();
+                if (measurePoints.length > 1) measurePoints.splice(-1);
+                updateMeasureSource();
+                setActiveTool(null);
+            }
+        });
+
+        // Mouse move: live preview + tooltip
+        const tooltip = document.getElementById('tool-tooltip');
+        map.on('mousemove', (e) => {
+            if (!activeTool) return;
+            tooltip.style.left = e.point.x + 'px';
+            tooltip.style.top  = e.point.y + 'px';
+
+            if (activeTool === 'measure') {
+                if (measurePoints.length > 0) {
+                    const cursor = [e.lngLat.lng, e.lngLat.lat];
+                    const dist = turf.length(turf.lineString([...measurePoints, cursor]), { units: 'kilometers' });
+                    tooltip.textContent = formatDist(dist);
+                    tooltip.style.display = 'block';
+                } else {
+                    tooltip.textContent = 'Click to start';
+                    tooltip.style.display = 'block';
+                }
+            } else if (activeTool === 'circle') {
+                if (circleCenter) {
+                    const cursor   = [e.lngLat.lng, e.lngLat.lat];
+                    const radiusKm = turf.distance(circleCenter, cursor, { units: 'kilometers' });
+                    updateCircleSource(circleCenter, radiusKm);
+                    tooltip.textContent = 'r = ' + formatRadius(radiusKm);
+                    tooltip.style.display = 'block';
+                } else {
+                    tooltip.textContent = 'Click to set center';
+                    tooltip.style.display = 'block';
+                }
+            }
+        });
+    });
+</script>
+</body>
+</html>
