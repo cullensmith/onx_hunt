@@ -611,9 +611,15 @@
             95:'Thunderstorm',96:'Thunderstorm w/ hail',99:'Thunderstorm w/ hail'
         };
 
+        let forecastLoading = false;
         async function fetchForecast(e) {
-            if (activeTool) return;
+            if (activeTool || forecastLoading) return;
+            forecastLoading = true;
             const { lng, lat } = e.lngLat;
+            const panel = document.getElementById('forecast');
+            panel.style.display = 'flex';
+            document.getElementById('forecast-hint').style.display = 'none';
+            panel.innerHTML = `<div class='forecast-day' style='text-align:center;opacity:0.6'>Loading forecast…</div>`;
             const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}` +
                 `&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode,sunrise,sunset` +
                 `&forecast_days=3&timezone=auto&temperature_unit=fahrenheit`;
@@ -623,12 +629,11 @@
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 data = await res.json();
             } catch (err) {
-                const panel = document.getElementById('forecast');
-                panel.style.display = 'flex';
-                document.getElementById('forecast-hint').style.display = 'none';
                 panel.innerHTML = `<div class='forecast-day' style='color:#c00;text-align:center'>Forecast unavailable — please try again.</div>`;
+                forecastLoading = false;
                 return;
             }
+            forecastLoading = false;
             const days = data.daily;
             const panel = document.getElementById('forecast');
             panel.style.display = 'flex';
