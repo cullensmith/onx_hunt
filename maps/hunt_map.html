@@ -248,6 +248,13 @@
 
     map.addControl(new mapboxgl.NavigationControl(), 'top-left');
 
+    map.on('style.load', () => {
+        map.setConfigProperty('basemap', 'showPlaceLabels',           false);
+        map.setConfigProperty('basemap', 'showRoadLabels',            false);
+        map.setConfigProperty('basemap', 'showPointOfInterestLabels', false);
+        map.setConfigProperty('basemap', 'showTransitLabels',         false);
+    });
+
     map.on('load', () => {
 
         // State mask — always on, black fill with holes cut out for NY/NJ/PA
