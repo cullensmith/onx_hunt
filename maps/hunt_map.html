@@ -187,7 +187,7 @@
         PA CWD Zones
     </label>
     <label class='layer-toggle'>
-        <span class='sw'><input type='checkbox' id='toggle-public-lands'><span class='sw-track'></span></span>
+        <span class='sw'><input type='checkbox' id='toggle-public-lands' checked><span class='sw-track'></span></span>
         <div class='swatch' style='background:#2d6a4f; opacity:0.8;'></div>
         Public Lands
     </label>
@@ -213,7 +213,7 @@
         Satellite
     </label>
     <label class='layer-toggle'>
-        <span class='sw'><input type='checkbox' id='toggle-labels' checked><span class='sw-track'></span></span>
+        <span class='sw'><input type='checkbox' id='toggle-labels'><span class='sw-track'></span></span>
         <div class='swatch' style='background:#aaa; opacity:0.8;'></div>
         Labels
     </label>
@@ -235,7 +235,15 @@
         style: 'mapbox://styles/keystonecarto/cmlrnr9vc004h01quch6rev08',
         // style: 'mapbox://styles/keystonecarto/cmlk0r3zj005v01qpesb5bfry',
         center: [-76.528, 41.985],
-        zoom: 6
+        zoom: 6,
+        config: {
+            basemap: {
+                showPlaceLabels: false,
+                showRoadLabels: false,
+                showPointOfInterestLabels: false,
+                showTransitLabels: false
+            }
+        }
     });
 
     map.addControl(new mapboxgl.NavigationControl(), 'top-left');
@@ -459,7 +467,7 @@
             source: 'public-lands',
             'source-layer': 'public_lands',
             paint: { 'fill-color': '#2d6a4f', 'fill-opacity': 0.25 },
-            layout: { visibility: 'none' }
+            layout: { visibility: 'visible' }
         });
         map.addLayer({
             id: 'public-lands-line',
@@ -468,7 +476,7 @@
             source: 'public-lands',
             'source-layer': 'public_lands',
             paint: { 'line-color': '#1b4332', 'line-width': 0.8 },
-            layout: { visibility: 'none' }
+            layout: { visibility: 'visible' }
         });
         map.on('click', 'public-lands-fill', (e) => {
             if (activeTool) return;
