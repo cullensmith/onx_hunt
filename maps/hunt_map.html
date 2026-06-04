@@ -635,9 +635,6 @@
             }
             forecastLoading = false;
             const days = data.daily;
-            const panel = document.getElementById('forecast');
-            panel.style.display = 'flex';
-            document.getElementById('forecast-hint').style.display = 'none';
             panel.innerHTML = days.time.map((date, i) => {
                 const name    = new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
                 const desc    = wmoDesc[days.weathercode[i]] || 'Unknown';
